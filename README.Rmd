@@ -1,0 +1,65 @@
+---
+output: github_document
+---
+
+# TRIMforPlants
+
+## Analyse de Tendances de Populations Végétales avec TRIM
+
+Le package **TRIMforPlants** fournit un pipeline complet pour la préparation, le nettoyage et l'analyse automatisée des données de suivi de populations végétales à l'aide de la méthode **TRIM** (TRends & Indices for Monitoring data).
+
+Il automatise l'application de multiples configurations de modèles (points de changement, covariables) et l'évaluation de leur validité.
+
+## Installation
+
+Vous pouvez installer la version de développement directement depuis GitHub. Assurez-vous d'avoir le package `devtools` installé au préalable.
+
+```{r}
+
+if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools")
+}
+
+
+devtools::install_github(
+  repo = "TRIMforPlants",
+  username = "FarahMessaadi-prog", 
+  build_vignettes = TRUE # Pour inclure le guide d'utilisation détaillé
+)
+```
+
+## Exemple rapide d'utilisation
+
+```{r}
+library(TRIMforPlants)
+
+# 1. Charger les données d'exemple intégrées
+data(trim_raw_data_example)
+
+# 2. Préparation des données (étapes intermédiaires omises)
+# Utilisez votre fonction prepare_data_for_trim sur df_clean
+df_trim_ready <- # ... (résultat de prepare_data_for_trim)
+espece_test <- "Aira caryophyllea L."
+
+# 3. Exécuter l'analyse multi-modèle pour l'espèce test
+results <- rtrim_multi_application(
+    dataset = subset(df_trim_ready, taxon == espece_test),
+    site_column = "canton",
+    year_column = "year",
+    unity_column = "taxon", 
+    effectiv_column = "effectif",
+    cp_candidates = c(2012, 2014)
+)
+
+# 4. Afficher le tableau des modèles valides
+results[[espece_test]]$valid_results_table
+```
+
+## Documentation détaillée
+
+Pour un guide complet sur l'ensemble du pipeline (nettoyage des données, filtrage, préparation des données, analyse de tendance), veuillez consulter la vignette : 
+
+```{r}
+vignette("Pipeline_analyse_tendance", package = "TRIMforPlants")
+```
+
