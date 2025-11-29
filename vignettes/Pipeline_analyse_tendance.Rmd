@@ -1,0 +1,206 @@
+---
+title: "Pipeline_analyse_tendance"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Pipeline_analyse_tendance}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(TRIMforPlants)
+```
+
+
+```{r setup2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Pipeline d'analyse TRIMforPlants 
+
+Ce script utilise les fonctions du package TRIMforPlants pour transformer des données brutes de suivi avec estimation d'abondance de populations végétales en tendances avec TRIM.
+
+1. Initialisation et chargement des données
+
+Chargez les bibliothèques et les objets de configuration par défaut du package.
+
+```{r data_init}
+# Installer si besoin : devtools::install()
+library(TRIMforPlants)
+library(dplyr)
+library(ggplot2)
+
+# Charger les objets de configuration par défaut
+data(columns_map)
+data(abundance_interval_boundaries)
+data(synonymes_template)
+
+# --- CHARGER LES DONNÉES D'EXEMPLE INTÉGRÉES ---
+data(trim_data_example) 
+df_raw <- trim_raw_data_example 
+
+# Définition des synonymes (si nécessaire, adaptez-les aux données intégrées)
+synonymes_list <- synonymes_template
+```
+
+
+2. Nettoyage et standardisation des données
+
+Utilisation de create_clean_data pour harmoniser les noms de colonnes, calculer l'effectif à partir des codes d'abondance et gérer les synonymes.
+
+Procédure 1 (Source InfoFlora/SIPV):
+```{r}
+df_clean <- create_clean_data(
+    df_raw = df_raw,
+    columns_map = TRIMforPlants::columns_map,
+    interval_table = TRIMforPlants::abundance_interval_boundaries,
+    taxon_synonyms = synonymes_list
+)
+
+head(df_clean)
+
+```
+
+
+Procédure 2 (Autre Source): Si les colonnes sont différentes, vous devez d'abord définir une carte personnalisée :
+
+```{r}
+# my_custom_map <- list(taxon = "Species", year = "Année_Obs", ...)
+# df_clean <- create_clean_data(df_raw, columns_map = my_custom_map, ...)
+```
+
+
+3. Filtrage initial et vérification de la validité
+
+Application de filtres personnalisés (année, précision, géographie) et vérification de la qualité des données d'abondance.
+
+```{r}
+# Application de filtres (à adapter selon vos critères)
+filtered_results <- apply_custom_filters(
+    data = df_clean,
+    year_filter = list('>=', 2000),
+    precision_filter = list('<=', 100),
+    canton_filter = c("GE", "VD"),
+    population_type_values = c("N", "I", "R") # 'N' pour Naturel, "I" pour Introduit, "R" pour "Réintroduit"
+)
+
+df_filtered <- filtered_results$data
+
+# Vérification des données valides (avec effectif et unité bien renseignés)
+validity_results <- filter_valid_data(df_filtered)
+
+# Affichage du graphique de synthèse de validité
+print(validity_results$plot)
+
+df_valid <- validity_results$data # Les données 'Usable' et 'Potentially usable'
+
+```
+
+
+
+4. Traitement manuel (Étape externe au script)
+
+C'est l'étape où vous devez agir manuellement :
+
+    Vérifiez la colonne effectif dans df_valid. Si elle contient des valeurs textes, vérifiez manuellement le commentaire en question pour trouver des indications numériques et mettez à jour la colonne effectif (en ne conservant que l'information numérique).
+
+    Définissez les sites : Si la colonne site_col de TRIM que vous souhaitez utiliser n'est pas incluses dans les données (autre que Caton ou Commune), utilisez un SIG (ArcGIS, QGIS) pour associer les coordonnées X/Y à un identifiant de site, et ajoutez cette colonne.
+
+    Rechargez : Si des modifications ont été faites, vous devez recharger le jeu de données corrigé.
+
+```{r}
+# df_manual_reloaded <- read.delim("chemin/vers/mon_fichier_corrige.txt")
+df_manual_reloaded <- df_valid # Pour l'exemple, on continue avec df_valid
+
+```
+
+
+5. Préparation des données pour TRIM
+
+Agrégation de l'effectif moyen par unité/site/année et remplissage des années manquantes.
+
+```{r}
+# Renseignez les noms de colonnes après le nettoyage manuel.
+df_trim_ready <- prepare_data_for_trim(
+    df = df_manual_reloaded,
+    taxon_col = "taxon",
+    site_col = "canton",   # Remplacer par 'site' si vous l'avez créé
+    year_col = "year",
+    unit_col = "unity",    # L'unité de comptage pour les tendances
+    effectiv_col = "effectif"
+)
+
+head(df_trim_ready)
+
+```
+
+
+
+6. Aperçu de la qualité des données (Optionnel)
+
+Visualisez les lacunes (heatmap) pour une espèce spécifique avant de lancer les modèles.
+
+```{r}
+espece_test <- "A. spicata L."
+df_sp <- subset(df_trim_ready, taxon == espece_test)
+
+if (nrow(df_sp) > 0) {
+    resume_result <- resume_data(
+        donneessp = df_sp,
+        colonnesite = "canton",
+        colonneannee = "year",
+        colonneeffectif = "effectif"
+    )
+
+    print(resume_result$resume_table)
+    print(resume_result$plot_heatmap) # Visualisation Site vs Année
+}
+```
+
+
+
+7. Application de différents modèles TRIM 
+
+Exécution automatisée de différents modèles (changepoints et covariables) avec gestion des erreurs.
+
+```{r}
+# --- À EXÉCUTER AVEC PRUDENCE (long) ---
+results_trim_all <- rtrim_multi_application(
+    dataset = df_trim_ready, # Peut également être appliqué uniquement à une espèce d'intérêt en mettant espèce_test comme dataset
+    site_column = "canton",
+    year_column = "year",
+    unity_column = "taxon", # L'unité d'analyse des tendances (ex: espèce)
+    effectiv_column = "effectif",
+    covariables = list(NULL), # Ajoutez d'autres listes de covariables si nécessaire
+    cp_candidates = c(2012, 2014),
+    n_cps_max = 1
+)
+
+# Afficher le résumé pour une espèce
+species_results <- results_trim_all[[espece_test]]
+print(species_results$valid_results_table) # Modèles qui passent les critères de validation
+
+```
+
+
+
+
+8. Visualisation des tendances
+
+Si vous avez des modèles valides, vous pouvez les visualiser (nécessite l'exécution de l'étape 7).
+
+```{r}
+# if (!is.null(species_results) && nrow(species_results$valid_results_table) > 0) {
+#    best_model_name <- species_results$valid_results_table$model_name[1]
+#    best_model <- species_results$models[[best_model_name]]
+#    rtrim::plot_trim_trend(best_model)
+# }
+```
+
